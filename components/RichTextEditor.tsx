@@ -5,7 +5,7 @@ interface RichTextEditorProps {
   onChange: (html: string) => void;
   defaultFontFamily: string;
   placeholder?: string;
-  availableVariables?: { key: string; label: string }[];
+  availableVariables?: { id: string; key: string; label: string }[];
   onAddVariable?: (key: string) => void;
   minHeight?: string;
 }

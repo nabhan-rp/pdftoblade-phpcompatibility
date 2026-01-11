@@ -327,7 +327,7 @@ const App: React.FC = () => {
       )}
 
       {(view === TabView.UPLOAD || view === TabView.EDITOR) && (
-          <div className={`w-full lg:w-[420px] flex-shrink-0 h-full transition-all duration-300 ${view === TabView.UPLOAD ? 'lg:w-full items-center justify-center' : ''} ${view === TabView.PREVIEW ? 'hidden lg:block' : ''}`}>
+          <div className={`w-full lg:w-[420px] flex-shrink-0 h-full transition-all duration-300 ${view === TabView.UPLOAD ? 'lg:w-full items-center justify-center' : ''}`}>
              {view === TabView.UPLOAD ? (
                  <div className="max-w-xl w-full p-8 bg-white rounded-2xl shadow-xl text-center mx-4">
                     <h1 className="text-3xl font-bold text-gray-800 mb-2">BladeRunner</h1>

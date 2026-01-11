@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // KONFIGURASI
 // ==========================================
 $apiKey = "GANTI_DENGAN_API_KEY_GEMINI_ANDA"; 
-$model = "gemini-1.5-flash"; 
+$model = "gemini-2.5-flash"; 
 
 // ==========================================
 // LOGIKA PROXY

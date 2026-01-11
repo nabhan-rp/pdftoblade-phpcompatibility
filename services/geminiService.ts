@@ -6,7 +6,9 @@ import { AnalysisResponse } from "../types";
  */
 const callPhpProxy = async (action: 'analyze' | 'generate-image', payload: any) => {
     try {
-        const response = await fetch('/api.php', {
+        // PERBAIKAN: Gunakan './api.php' agar relatif terhadap lokasi index.html
+        // Ini penting jika aplikasi ditaruh di sub-folder hosting (misal: domain.com/app/)
+        const response = await fetch('./api.php', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -17,15 +19,21 @@ const callPhpProxy = async (action: 'analyze' | 'generate-image', payload: any) 
             })
         });
 
+        const responseText = await response.text();
+
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Server Error (${response.status}): ${errorText}`);
+            throw new Error(`Server Error (${response.status}): ${responseText.substring(0, 200)}...`);
         }
 
-        return await response.json();
+        try {
+            return JSON.parse(responseText);
+        } catch (e) {
+            console.error("Invalid JSON received:", responseText);
+            throw new Error("Server returned invalid JSON. Check console for details.");
+        }
     } catch (error) {
         console.error("Proxy Error:", error);
-        throw new Error("Failed to communicate with the server. Ensure api.php is uploaded correctly.");
+        throw error;
     }
 };
 

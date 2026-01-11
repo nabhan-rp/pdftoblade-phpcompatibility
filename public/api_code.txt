@@ -1,71 +1,75 @@
 <?php
-// Handle CORS (Cross-Origin Resource Sharing)
-// Ini penting agar frontend (React) bisa mengakses file PHP ini
+// Mencegah PHP menampilkan error/warning ke output (agar JSON tidak rusak)
+error_reporting(0);
+ini_set('display_errors', 0);
+
+// Memperpanjang waktu eksekusi (Shared hosting biasanya default 30s, kita naikkan)
+set_time_limit(120); 
+
+// Handle CORS
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Headers: Content-Type");
 header("Content-Type: application/json");
 
-// Jika request adalah OPTIONS (pre-flight check dari browser), langsung return OK
+// Tangkap buffer output (jika ada spasi kosong atau warning sebelum header)
+ob_start();
+
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
+    ob_end_clean();
     exit;
 }
 
 // ==========================================
 // KONFIGURASI
 // ==========================================
-
-// MASUKKAN API KEY GEMINI ANDA DI BAWAH INI (Di dalam tanda kutip)
 $apiKey = "GANTI_DENGAN_API_KEY_GEMINI_ANDA"; 
-
-// Model yang digunakan (bisa diubah ke gemini-1.5-pro jika perlu analisis lebih berat)
 $model = "gemini-1.5-flash"; 
 
 // ==========================================
 // LOGIKA PROXY
 // ==========================================
 
-// Ambil data JSON yang dikirim oleh Frontend
 $inputJSON = file_get_contents('php://input');
 $input = json_decode($inputJSON, true);
 
-// Validasi input
 if (!$input || !isset($input['payload'])) {
     http_response_code(400);
+    ob_end_clean();
     echo json_encode(["error" => "Invalid request format. Payload missing."]);
     exit;
 }
 
 $payload = $input['payload'];
-$action = $input['action'] ?? 'analyze'; // 'analyze' atau 'generate-image'
 
-// URL Endpoint Google Gemini API
 $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}";
 
-// Inisialisasi CURL untuk mengirim request ke Google
 $ch = curl_init($url);
-
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-curl_setopt($ch, CURLOPT_HTTPHEADER, [
-    'Content-Type: application/json'
-]);
+curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Matikan jika ada masalah SSL di localhost (nyalakan di production)
+curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+curl_setopt($ch, CURLOPT_TIMEOUT, 120); // Timeout CURL disamakan
 
-// Eksekusi Request
 $response = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 $curlError = curl_error($ch);
-
 curl_close($ch);
 
-// Kirim balik respons ke Frontend
+// Bersihkan buffer output sebelum mengirim respons final
+ob_end_clean(); 
+
 if ($curlError) {
     http_response_code(500);
     echo json_encode(["error" => "Server Proxy Error: " . $curlError]);
 } else {
     http_response_code($httpCode);
-    echo $response;
+    // Pastikan respons adalah JSON yang valid, jika kosong kirim error
+    if (empty($response)) {
+        echo json_encode(["error" => "Empty response from Google API"]);
+    } else {
+        echo $response;
+    }
 }
 ?>

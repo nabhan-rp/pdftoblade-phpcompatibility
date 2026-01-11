@@ -3,6 +3,9 @@
 error_reporting(0);
 ini_set('display_errors', 0);
 
+// Agar script tetap berjalan meski browser close connection (opsional, tapi berguna utk debugging)
+ignore_user_abort(true);
+
 // Memperpanjang waktu eksekusi (Shared hosting biasanya default 30s, kita naikkan)
 set_time_limit(120); 
 
@@ -10,6 +13,7 @@ set_time_limit(120);
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Headers: Content-Type");
 header("Content-Type: application/json");
+header("Connection: keep-alive"); // Membantu menjaga koneksi
 
 // Tangkap buffer output (jika ada spasi kosong atau warning sebelum header)
 ob_start();

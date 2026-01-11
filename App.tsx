@@ -101,6 +101,45 @@ const App: React.FC = () => {
     }
   };
 
+  // Helper: Resize image to max 1024px width/height to save bandwidth & prevent PHP timeouts
+  const resizeImage = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+              const img = new Image();
+              img.onload = () => {
+                  const canvas = document.createElement('canvas');
+                  let width = img.width;
+                  let height = img.height;
+                  const MAX_SIZE = 1024; // Safe size for shared hosting & Gemini
+
+                  if (width > height) {
+                      if (width > MAX_SIZE) {
+                          height *= MAX_SIZE / width;
+                          width = MAX_SIZE;
+                      }
+                  } else {
+                      if (height > MAX_SIZE) {
+                          width *= MAX_SIZE / height;
+                          height = MAX_SIZE;
+                      }
+                  }
+
+                  canvas.width = width;
+                  canvas.height = height;
+                  const ctx = canvas.getContext('2d');
+                  ctx?.drawImage(img, 0, 0, width, height);
+                  
+                  // Compress to JPEG 0.7 quality
+                  resolve(canvas.toDataURL('image/jpeg', 0.7)); 
+              };
+              img.src = e.target?.result as string;
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+      });
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -119,14 +158,34 @@ const App: React.FC = () => {
         return;
     }
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const base64Result = e.target?.result as string;
-      setDocState(prev => ({ ...prev, originalImage: isImage ? base64Result : null, isAnalyzing: true, analysisError: null }));
-      
-      try {
-        const base64Data = base64Result.split(',')[1];
-        const analysis = await analyzeDocumentImage(base64Data, file.type);
+    setDocState(prev => ({ ...prev, isAnalyzing: true, analysisError: null }));
+
+    try {
+        let base64Data = "";
+        let finalMimeType = file.type;
+
+        if (isImage) {
+            // Resize Image Client-Side
+            const resizedDataUrl = await resizeImage(file);
+            setDocState(prev => ({ ...prev, originalImage: resizedDataUrl }));
+            base64Data = resizedDataUrl.split(',')[1];
+            finalMimeType = 'image/jpeg';
+        } else {
+            // Handle PDF (cannot easily resize client-side without heavy libs, send as is)
+            // Warning: Large PDFs might still timeout on cheap hosting
+            const reader = new FileReader();
+            base64Data = await new Promise((resolve, reject) => {
+                reader.onload = (e) => {
+                    const res = e.target?.result as string;
+                    setDocState(prev => ({ ...prev, originalImage: null })); // Cannot preview PDF easily
+                    resolve(res.split(',')[1]);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        const analysis = await analyzeDocumentImage(base64Data, finalMimeType);
         
         let detectedHeader = '';
         if (analysis.institutionName || analysis.institutionAddress) {
@@ -156,13 +215,16 @@ const App: React.FC = () => {
         }));
         
         setView(TabView.EDITOR);
-      } catch (err) {
-        setDocState(prev => ({ ...prev, analysisError: "AI Analysis failed. Please try 'Manual Creation' or a different file." }));
-      } finally {
+
+    } catch (err: any) {
+        console.error(err);
+        setDocState(prev => ({ 
+            ...prev, 
+            analysisError: `Analysis Failed: ${err.message || 'Unknown Error'}. Try manual creation or a smaller image.` 
+        }));
+    } finally {
         setDocState(prev => ({ ...prev, isAnalyzing: false }));
-      }
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   const handleDownloadBlade = () => {
@@ -338,11 +400,17 @@ const App: React.FC = () => {
                         <strong>Note:</strong> Microsoft Word (.docx) and Google Docs are <u>not supported directly</u>. Please use "Save as PDF" first, then upload the PDF here.
                     </div>
 
+                    {docState.analysisError && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800 mb-4 text-left">
+                            <strong>Error:</strong> {docState.analysisError}
+                        </div>
+                    )}
+
                     <div className="flex flex-col gap-4">
                         <div className="relative group w-full">
                             <input type="file" accept="image/*,.pdf" ref={fileInputRef} onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={docState.isAnalyzing} />
                             <button className={`w-full py-4 rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50 text-indigo-700 font-medium ${docState.isAnalyzing ? 'animate-pulse' : ''}`}>
-                                {docState.isAnalyzing ? 'Analyzing Document with AI...' : 'Click to Upload PDF or Image'}
+                                {docState.isAnalyzing ? 'Compressing & Analyzing (Please Wait)...' : 'Click to Upload PDF or Image'}
                             </button>
                         </div>
                         

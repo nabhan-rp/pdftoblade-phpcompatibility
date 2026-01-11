@@ -1,0 +1,7 @@
+{
+  "name": "Copy of BladeRunner - AI Letter Template Generator | PHP shared hosting compatibility",
+  "description": "Convert document screenshots into dynamic Laravel Blade templates using Gemini intelligence. Features intelligent layout analysis, customizable styling for headers/margins, and logo generation.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

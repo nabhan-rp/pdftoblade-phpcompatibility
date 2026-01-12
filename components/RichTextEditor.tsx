@@ -43,6 +43,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   minHeight = '200px'
 }) => {
   const editorRef = useRef<HTMLDivElement>(null);
+  const savedRange = useRef<Range | null>(null); // Track selection
   const [showVarMenu, setShowVarMenu] = useState(false);
   const [showBulletMenu, setShowBulletMenu] = useState(false);
   const [showNumberMenu, setShowNumberMenu] = useState(false);
@@ -52,12 +53,12 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
     if (editorRef.current) {
         const currentHtml = editorRef.current.innerHTML;
         if (content !== currentHtml) {
+             // Only update if not focused to avoid cursor jumping, 
+             // OR if content is empty (reset)
              if (document.activeElement !== editorRef.current) {
                 editorRef.current.innerHTML = content;
-             } else {
-                 if (content === '' && currentHtml !== '') {
-                     editorRef.current.innerHTML = '';
-                 }
+             } else if (content === '' && currentHtml !== '') {
+                 editorRef.current.innerHTML = '';
              }
         }
     }
@@ -66,9 +67,6 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   // Handle click outside to close menus
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-        if (editorRef.current && !editorRef.current.contains(event.target as Node)) {
-             // Optional: logic to close text menus if needed, but primarily handled by onBlur/focus
-        }
         // Close toolbar menus if clicking elsewhere
         const target = event.target as HTMLElement;
         if (!target.closest('.toolbar-menu-trigger')) {
@@ -91,6 +89,23 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
     }
   };
 
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
+      savedRange.current = sel.getRangeAt(0);
+    }
+  };
+
+  const restoreSelection = () => {
+      const sel = window.getSelection();
+      if (sel && savedRange.current) {
+          sel.removeAllRanges();
+          sel.addRange(savedRange.current);
+      } else {
+          editorRef.current?.focus();
+      }
+  };
+
   const execCmd = (command: string, value: string | undefined = undefined) => {
     document.execCommand(command, false, value);
     editorRef.current?.focus();
@@ -98,25 +113,22 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   };
 
   const applyListStyle = (command: string, styleType: string) => {
+    restoreSelection(); // Ensure we apply to the correct place if menu stole focus
     // 1. Execute standard command to create list structure
     document.execCommand(command, false, undefined);
 
     // 2. Find the active list element and apply inline styles
-    // This is CRITICAL because Tailwind CSS resets list-style to 'none' and padding to 0.
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
         let node = selection.getRangeAt(0).commonAncestorContainer;
         
-        // Traverse up to find the UL or OL
         while (node && node.nodeName !== 'UL' && node.nodeName !== 'OL' && node !== editorRef.current) {
             node = node.parentNode as Node;
         }
 
         if (node && (node.nodeName === 'UL' || node.nodeName === 'OL')) {
             const listElement = node as HTMLElement;
-            // Apply style type (disc, decimal, etc)
             listElement.style.listStyleType = styleType;
-            // Apply padding so bullets/numbers are visible inside the editor
             listElement.style.paddingLeft = '24px';
             listElement.style.marginLeft = '12px';
         }
@@ -138,15 +150,12 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
     const cols = parseInt(colsInput) || 3;
 
     if (rows > 0 && cols > 0) {
+      restoreSelection();
       let tableHtml = '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;"><thead><tr>';
-      
-      // Header row
       for (let j = 0; j < cols; j++) {
          tableHtml += `<th style="border: 1px solid #000; padding: 5px; background: #f0f0f0;">Header ${j + 1}</th>`;
       }
       tableHtml += '</tr></thead><tbody>';
-
-      // Body rows
       for (let i = 0; i < rows; i++) {
         tableHtml += '<tr>';
         for (let j = 0; j < cols; j++) {
@@ -162,42 +171,45 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   };
 
   const insertHr = () => {
+      restoreSelection();
       const hrHtml = '<hr style="border-top: 1px solid #000; margin: 15px 0; width: 100%;" /><p><br></p>';
       document.execCommand('insertHTML', false, hrHtml);
       handleInput();
   };
 
   const applyFontSize = () => {
+    if (!customFontSize || isNaN(Number(customFontSize))) return;
+    
+    restoreSelection();
+
     const size = customFontSize + 'pt';
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      const span = document.createElement('span');
-      span.style.fontSize = size;
-      try {
-         if (!range.collapsed) {
-             range.surroundContents(span);
-         } else {
-             span.appendChild(document.createTextNode('\u200B'));
-             range.insertNode(span);
-             range.setStart(span, 1);
-             range.setEnd(span, 1);
-         }
-      } catch (e) {
-          document.execCommand('fontSize', false, '3');
-      }
-      selection.removeAllRanges();
-      selection.addRange(range);
-      handleInput();
+    const uuid = "fs-" + Date.now();
+
+    // Use fontName command to wrap selection safely across block elements
+    document.execCommand('fontName', false, uuid);
+
+    // Replace the specific font tags with spans
+    if (editorRef.current) {
+        const fontTags = editorRef.current.querySelectorAll(`font[face="${uuid}"]`);
+        fontTags.forEach(el => {
+            const span = document.createElement('span');
+            span.style.fontSize = size;
+            span.innerHTML = el.innerHTML;
+            el.parentNode?.replaceChild(span, el);
+        });
     }
+
+    handleInput();
   };
 
   const handleFontFamily = (font: string) => {
+    restoreSelection();
     document.execCommand('fontName', false, font);
     handleInput();
   };
 
   const insertVariable = (key: string) => {
+    restoreSelection();
     const text = `{{ $${key} }}`;
     document.execCommand('insertText', false, text);
     setShowVarMenu(false);
@@ -220,25 +232,25 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
         
         {/* Row 1: Formatting */}
         <div className="flex bg-white rounded border border-gray-300 mr-1 shadow-sm">
-          <button onClick={() => execCmd('bold')} className="p-1.5 hover:bg-gray-200 text-gray-700" title="Bold"><b>B</b></button>
-          <button onClick={() => execCmd('italic')} className="p-1.5 hover:bg-gray-200 text-gray-700" title="Italic"><i>I</i></button>
-          <button onClick={() => execCmd('underline')} className="p-1.5 hover:bg-gray-200 text-gray-700" title="Underline"><u>U</u></button>
-          <button onClick={() => execCmd('strikeThrough')} className="p-1.5 hover:bg-gray-200 text-gray-700" title="Strike"><s>S</s></button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCmd('bold')} className="p-1.5 hover:bg-gray-200 text-gray-700" title="Bold"><b>B</b></button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCmd('italic')} className="p-1.5 hover:bg-gray-200 text-gray-700" title="Italic"><i>I</i></button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCmd('underline')} className="p-1.5 hover:bg-gray-200 text-gray-700" title="Underline"><u>U</u></button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCmd('strikeThrough')} className="p-1.5 hover:bg-gray-200 text-gray-700" title="Strike"><s>S</s></button>
         </div>
 
         {/* Alignment */}
         <div className="flex bg-white rounded border border-gray-300 mr-1 shadow-sm">
-            <button onClick={() => execCmd('justifyLeft')} className="p-1.5 hover:bg-gray-200 text-gray-600" title="Left"><span className="block w-3 h-0.5 bg-current mb-0.5"></span><span className="block w-2 h-0.5 bg-current mb-0.5"></span><span className="block w-3 h-0.5 bg-current"></span></button>
-            <button onClick={() => execCmd('justifyCenter')} className="p-1.5 hover:bg-gray-200 text-gray-600" title="Center"><span className="block w-3 h-0.5 bg-current mb-0.5 mx-auto"></span><span className="block w-2 h-0.5 bg-current mb-0.5 mx-auto"></span><span className="block w-3 h-0.5 bg-current mx-auto"></span></button>
-            <button onClick={() => execCmd('justifyRight')} className="p-1.5 hover:bg-gray-200 text-gray-600" title="Right"><span className="block w-3 h-0.5 bg-current mb-0.5 ml-auto"></span><span className="block w-2 h-0.5 bg-current mb-0.5 ml-auto"></span><span className="block w-3 h-0.5 bg-current ml-auto"></span></button>
-            <button onClick={() => execCmd('justifyFull')} className="p-1.5 hover:bg-gray-200 text-gray-600" title="Justify"><span className="block w-3 h-0.5 bg-current mb-0.5"></span><span className="block w-3 h-0.5 bg-current mb-0.5"></span><span className="block w-3 h-0.5 bg-current"></span></button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCmd('justifyLeft')} className="p-1.5 hover:bg-gray-200 text-gray-600" title="Left"><span className="block w-3 h-0.5 bg-current mb-0.5"></span><span className="block w-2 h-0.5 bg-current mb-0.5"></span><span className="block w-3 h-0.5 bg-current"></span></button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCmd('justifyCenter')} className="p-1.5 hover:bg-gray-200 text-gray-600" title="Center"><span className="block w-3 h-0.5 bg-current mb-0.5 mx-auto"></span><span className="block w-2 h-0.5 bg-current mb-0.5 mx-auto"></span><span className="block w-3 h-0.5 bg-current mx-auto"></span></button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCmd('justifyRight')} className="p-1.5 hover:bg-gray-200 text-gray-600" title="Right"><span className="block w-3 h-0.5 bg-current mb-0.5 ml-auto"></span><span className="block w-2 h-0.5 bg-current mb-0.5 ml-auto"></span><span className="block w-3 h-0.5 bg-current ml-auto"></span></button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCmd('justifyFull')} className="p-1.5 hover:bg-gray-200 text-gray-600" title="Justify"><span className="block w-3 h-0.5 bg-current mb-0.5"></span><span className="block w-3 h-0.5 bg-current mb-0.5"></span><span className="block w-3 h-0.5 bg-current"></span></button>
         </div>
 
         {/* Lists & Indent */}
         <div className="flex bg-white rounded border border-gray-300 mr-1 shadow-sm items-center">
            {/* Bullet Dropdown */}
            <div className="relative toolbar-menu-trigger">
-                <button onClick={() => { setShowBulletMenu(!showBulletMenu); setShowNumberMenu(false); }} className="p-1.5 hover:bg-gray-200 flex items-center gap-0.5 text-gray-900" title="Bullet List">
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => { setShowBulletMenu(!showBulletMenu); setShowNumberMenu(false); }} className="p-1.5 hover:bg-gray-200 flex items-center gap-0.5 text-gray-900" title="Bullet List">
                     <span>•</span> <span className="text-[10px] opacity-60">▼</span>
                 </button>
                 {showBulletMenu && (
@@ -258,7 +270,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
 
            {/* Number Dropdown */}
            <div className="relative toolbar-menu-trigger">
-                <button onClick={() => { setShowNumberMenu(!showNumberMenu); setShowBulletMenu(false); }} className="p-1.5 hover:bg-gray-200 flex items-center gap-0.5 text-gray-900" title="Numbered List">
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => { setShowNumberMenu(!showNumberMenu); setShowBulletMenu(false); }} className="p-1.5 hover:bg-gray-200 flex items-center gap-0.5 text-gray-900" title="Numbered List">
                     <span>1.</span> <span className="text-[10px] opacity-60">▼</span>
                 </button>
                 {showNumberMenu && (
@@ -278,14 +290,14 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
            
            <div className="w-[1px] h-4 bg-gray-200 mx-0.5"></div>
            
-           <button onClick={() => execCmd('outdent')} className="p-1.5 hover:bg-gray-200 text-gray-900" title="Outdent">←|</button>
-           <button onClick={() => execCmd('indent')} className="p-1.5 hover:bg-gray-200 text-gray-900" title="Indent">|→</button>
+           <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCmd('outdent')} className="p-1.5 hover:bg-gray-200 text-gray-900" title="Outdent">←|</button>
+           <button onMouseDown={(e) => e.preventDefault()} onClick={() => execCmd('indent')} className="p-1.5 hover:bg-gray-200 text-gray-900" title="Indent">|→</button>
         </div>
 
         {/* Table & HR */}
         <div className="flex bg-white rounded border border-gray-300 mr-1 shadow-sm">
-            <button onClick={insertTable} className="p-1.5 hover:bg-gray-200 text-xs font-bold px-2 text-gray-900" title="Insert Table">Table</button>
-            <button onClick={insertHr} className="p-1.5 hover:bg-gray-200 text-xs px-2 font-mono text-gray-900" title="Horizontal Line">HR</button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={insertTable} className="p-1.5 hover:bg-gray-200 text-xs font-bold px-2 text-gray-900" title="Insert Table">Table</button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={insertHr} className="p-1.5 hover:bg-gray-200 text-xs px-2 font-mono text-gray-900" title="Horizontal Line">HR</button>
         </div>
 
         <div className="w-full h-0 basis-full lg:hidden"></div> {/* Break row on small screens */}
@@ -302,12 +314,16 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
                 type="number" 
                 value={customFontSize}
                 onChange={(e) => setCustomFontSize(e.target.value)}
-                onBlur={applyFontSize}
                 onKeyDown={(e) => e.key === 'Enter' && applyFontSize()}
+                // We don't use onBlur to trigger applyFontSize anymore because it conflicts with restoring selection logic sometimes.
+                // Or we can keep it but we must rely on savedRange.
+                // Let's rely on Enter key for now as it's explicit. Or add a small button.
+                // Actually, let's keep it simple: Enter key applies it.
                 className="w-10 text-xs text-center outline-none bg-transparent text-gray-900"
-                title="Font Size (pt)"
+                title="Font Size (pt) - Press Enter to apply"
             />
             <span className="text-xs text-gray-500">pt</span>
+            <button onClick={applyFontSize} className="bg-gray-100 hover:bg-gray-200 text-xs px-2 h-full border-l border-gray-300">Set</button>
         </div>
 
         {/* Color Picker */}
@@ -325,6 +341,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
         {/* Variables */}
         <div className="relative ml-auto toolbar-menu-trigger">
             <button 
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => setShowVarMenu(!showVarMenu)}
                 className="flex items-center gap-1 bg-indigo-600 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-indigo-700 shadow-sm"
             >
@@ -349,6 +366,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
         ref={editorRef}
         contentEditable
         onInput={handleInput}
+        onBlur={saveSelection}
         className="flex-1 p-8 outline-none prose prose-sm max-w-none focus:bg-white text-gray-900 text-left cursor-text overflow-auto"
         style={{ 
             fontFamily: defaultFontFamily,

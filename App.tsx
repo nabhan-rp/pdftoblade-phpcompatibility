@@ -448,6 +448,9 @@ const App: React.FC = () => {
                             <button onClick={handleManualCreate} className="w-full py-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 font-medium text-gray-700 shadow-sm col-span-2">
                                 Manual Creation
                             </button>
+                            <p className="col-span-2 text-xs text-indigo-600 font-medium text-center bg-indigo-50 py-2 rounded border border-indigo-100">
+                                Start from scratch with a blank canvas. No AI analysis.
+                            </p>
                             <button onClick={handleOpenViewer} className="w-full py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-xs text-gray-600 col-span-2">
                                 ↗ Open Viewer
                             </button>

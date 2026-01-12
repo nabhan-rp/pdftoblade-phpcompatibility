@@ -149,7 +149,7 @@ const App: React.FC = () => {
       });
   };
 
-  // --- PARSE BLADE FILE LOGIC ---
+  // --- PARSE BLADE FILE LOGIC (ROBUST DOM-BASED) ---
   const handleBladeUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file) return;
@@ -160,7 +160,7 @@ const App: React.FC = () => {
           try {
               parseBladeContent(text);
           } catch (err) {
-              alert("Error parsing Blade file. Is it a standard template?");
+              alert("Error parsing Blade file. Make sure it's a valid HTML/Blade file.");
               console.error(err);
           }
       };
@@ -169,78 +169,120 @@ const App: React.FC = () => {
 
   const parseBladeContent = (text: string) => {
       const newSettings = { ...DEFAULT_SETTINGS };
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, 'text/html');
 
-      // 1. Page Size
-      const pageRegex = /@page\s*\{\s*size:\s*([\d.]+[a-z]+)\s+([\d.]+[a-z]+);\s*margin:\s*([\d.]+[a-z]+)\s+([\d.]+[a-z]+)\s+([\d.]+[a-z]+)\s+([\d.]+[a-z]+);/i;
-      const pageMatch = text.match(pageRegex);
-      if (pageMatch) {
-          const widthStr = pageMatch[1];
-          const unitMatch = widthStr.match(/[a-z]+/i);
-          const unit = (unitMatch ? unitMatch[0] : 'cm') as any;
+      // 1. Page Size & CSS
+      const styleTag = doc.querySelector('style');
+      if (styleTag) {
+          const styleText = styleTag.textContent || '';
+          const pageRegex = /@page\s*\{\s*size:\s*([\d.]+[a-z]+)\s+([\d.]+[a-z]+);\s*margin:\s*([\d.]+[a-z]+)\s+([\d.]+[a-z]+)\s+([\d.]+[a-z]+)\s+([\d.]+[a-z]+);/i;
+          const pageMatch = styleText.match(pageRegex);
+          if (pageMatch) {
+              const widthStr = pageMatch[1];
+              const unitMatch = widthStr.match(/[a-z]+/i);
+              const unit = (unitMatch ? unitMatch[0] : 'cm') as any;
 
-          newSettings.unit = unit;
-          newSettings.pageWidth = parseFloat(pageMatch[1]);
-          newSettings.pageHeight = parseFloat(pageMatch[2]);
-          newSettings.marginTop = parseFloat(pageMatch[3]);
-          newSettings.marginRight = parseFloat(pageMatch[4]);
-          newSettings.marginBottom = parseFloat(pageMatch[5]);
-          newSettings.marginLeft = parseFloat(pageMatch[6]);
-          newSettings.pageSize = 'Custom';
+              newSettings.unit = unit;
+              newSettings.pageWidth = parseFloat(pageMatch[1]);
+              newSettings.pageHeight = parseFloat(pageMatch[2]);
+              newSettings.marginTop = parseFloat(pageMatch[3]);
+              newSettings.marginRight = parseFloat(pageMatch[4]);
+              newSettings.marginBottom = parseFloat(pageMatch[5]);
+              newSettings.marginLeft = parseFloat(pageMatch[6]);
+              newSettings.pageSize = 'Custom';
+          }
+          const fontMatch = styleText.match(/body\s*\{\s*font-family:\s*([^;]+);/i);
+          if (fontMatch) newSettings.globalFontFamily = fontMatch[1].trim();
       }
 
-      // 2. Fonts
-      const fontRegex = /body\s*\{\s*font-family:\s*([^;]+);/i;
-      const fontMatch = text.match(fontRegex);
-      if (fontMatch) newSettings.globalFontFamily = fontMatch[1].trim();
-
-      // 3. Header
-      const headerRegex = /<table class="header-table"[^>]*>([\s\S]*?)<\/table>/i;
-      const headerMatch = text.match(headerRegex);
-      if (headerMatch) {
+      // 2. Header / Kop Surat (Support Table and Div structures)
+      const headerTable = doc.querySelector('table.header-table');
+      const headerDiv = doc.querySelector('div.header-container');
+      
+      if (headerTable) {
           newSettings.showKop = true;
-          const textCellRegex = /<td[^>]*text-align:\s*center[^>]*>([\s\S]*?)<\/td>/i;
-          const textCellMatch = headerMatch[1].match(textCellRegex);
-          if (textCellMatch) newSettings.headerContent = textCellMatch[1].trim();
+          // Find center text cell
+          const centerCell = Array.from(headerTable.querySelectorAll('td')).find(td => 
+              td.getAttribute('style')?.includes('text-align: center')
+          );
+          if (centerCell) newSettings.headerContent = centerCell.innerHTML.trim();
 
-          const imgRegex = /<img src="([^"]+)"/g;
-          const images = [...headerMatch[1].matchAll(imgRegex)];
-          if (images.length > 0) {
-              newSettings.logoUrl = images[0][1];
-              if (images.length > 1) {
-                  newSettings.showRightLogo = true;
-                  newSettings.rightLogoUrl = images[1][1];
-              }
+          const imgs = headerTable.querySelectorAll('img');
+          if (imgs.length > 0) newSettings.logoUrl = imgs[0].getAttribute('src') || '';
+          if (imgs.length > 1) {
+              newSettings.showRightLogo = true;
+              newSettings.rightLogoUrl = imgs[1].getAttribute('src') || '';
           }
+      } else if (headerDiv) {
+          newSettings.showKop = true;
+          const contentDiv = headerDiv.querySelector('.header-content');
+          if (contentDiv) newSettings.headerContent = contentDiv.innerHTML.trim();
+          
+          const logoDiv = headerDiv.querySelector('.header-logo');
+          if (logoDiv) {
+              const img = logoDiv.querySelector('img');
+              if (img) newSettings.logoUrl = img.getAttribute('src') || '';
+          }
+          // Assuming div structure mostly used for single logo, but if complex we can expand.
       } else {
           newSettings.showKop = false;
       }
 
+      // 3. Header Lines
+      const linesDiv = doc.querySelector('div.header-lines');
+      if (linesDiv) {
+          const lines: any[] = [];
+          Array.from(linesDiv.children).forEach((child, idx) => {
+              const style = child.getAttribute('style') || '';
+              // Simple extraction of border props
+              const widthMatch = style.match(/border-bottom(?:-width)?:\s*(\d+)px/i);
+              if (widthMatch) {
+                   const styleMatch = style.match(/border-bottom(?:-style)?:\s*(\w+)/i);
+                   const colorMatch = style.match(/border-bottom(?:-color)?:\s*(#[0-9a-fA-F]+|[a-z]+)/i);
+                   const mtMatch = style.match(/margin-top:\s*(\d+)px/i);
+                   const mbMatch = style.match(/margin-bottom:\s*(\d+)px/i);
+                   
+                   lines.push({
+                        id: `line-load-${idx}`,
+                        width: parseInt(widthMatch[1]),
+                        style: (styleMatch ? styleMatch[1] : 'solid') as any,
+                        color: colorMatch ? colorMatch[1] : '#000000',
+                        marginTop: mtMatch ? parseInt(mtMatch[1]) : 0,
+                        marginBottom: mbMatch ? parseInt(mbMatch[1]) : 0
+                   });
+              }
+          });
+          if (lines.length > 0) newSettings.headerLines = lines;
+      }
+
       // 4. Content
-      const contentRegex = /<div class="content">([\s\S]*?)<\/div>\s*(@if|@endif|<div class="signature)/i;
-      const contentMatch = text.match(contentRegex);
-      if (contentMatch) newSettings.rawHtmlContent = contentMatch[1].trim();
+      const contentDiv = doc.querySelector('div.content');
+      if (contentDiv) {
+          newSettings.rawHtmlContent = contentDiv.innerHTML.trim();
+      }
 
       // 5. Footer
-      const footerRegex = /<div class="footer">([\s\S]*?)<\/div>/i;
-      const footerMatch = text.match(footerRegex);
-      if (footerMatch) {
+      const footerDiv = doc.querySelector('div.footer');
+      if (footerDiv) {
           newSettings.showFooter = true;
-          newSettings.footerContent = footerMatch[1].trim();
+          newSettings.footerContent = footerDiv.innerHTML.trim();
       }
 
       // 6. Attachments
-      const attachmentRegex = /<div class="attachment-section">([\s\S]*?)<\/div>/i;
-      const attachmentMatch = text.match(attachmentRegex);
-      if (attachmentMatch) {
+      const attachmentDiv = doc.querySelector('div.attachment-section');
+      if (attachmentDiv) {
           newSettings.hasAttachment = true;
-          const pageBreakHeaderRegex = /<div class="page-break"><\/div>\s*<table class="header-table"/i;
-          if (text.match(pageBreakHeaderRegex)) newSettings.attachmentShowKop = true;
-          let attachContent = attachmentMatch[1].trim();
-          attachContent = attachContent.replace(/<h3>Lampiran<\/h3>/i, '');
-          newSettings.attachmentContent = attachContent.trim();
+          // Check for header repetition
+          const headers = doc.querySelectorAll('.header-table, .header-container');
+          if (headers.length > 1) newSettings.attachmentShowKop = true;
+
+          let html = attachmentDiv.innerHTML;
+          html = html.replace(/<h3>Lampiran<\/h3>/i, '');
+          newSettings.attachmentContent = html.trim();
       }
 
-      // 7. Variables
+      // 7. Variables (Regex still best for this)
       const varRegex = /\{\{\s*\$([a-zA-Z0-9_]+)\s*\}\}/g;
       const foundVars = new Set<string>();
       const varMatches = [...text.matchAll(varRegex)];
@@ -259,12 +301,21 @@ const App: React.FC = () => {
       });
       if (newVariables.length > 0) newSettings.variables = newVariables;
       
-      // 8. Signatures (Simple detection)
-      if (text.includes('class="signature-container"')) {
+      // 8. Signatures
+      const sigContainer = doc.querySelector('div.signature-container');
+      if (sigContainer) {
            newSettings.showSignature = true;
-           const cityRegex = />([^<]+),\s*\{\{\s*\$tanggal/i;
-           const cityMatch = text.match(cityRegex);
-           if (cityMatch) newSettings.signatureCity = cityMatch[1].trim();
+           const sigBlocks = sigContainer.querySelectorAll('.sig-block');
+           if (sigBlocks.length > 0) {
+               // Try to infer city from last block
+               const lastSig = sigBlocks[sigBlocks.length - 1];
+               const cityP = Array.from(lastSig.querySelectorAll('p')).find(p => p.textContent?.includes('$tanggal'));
+               if (cityP) {
+                   const cityText = cityP.textContent || '';
+                   const cityMatch = cityText.split(',')[0].trim();
+                   newSettings.signatureCity = cityMatch;
+               }
+           }
       }
 
       setSettings(newSettings);

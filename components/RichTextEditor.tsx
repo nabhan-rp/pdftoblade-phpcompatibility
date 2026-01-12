@@ -180,7 +180,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       return null;
   };
 
-  const applyTableBorder = (type: 'all' | 'none' | 'outer') => {
+  const applyTableBorder = (type: 'all' | 'none' | 'outer' | 'inner') => {
       const table = getParentTable();
       if (!table) {
           alert("Please place cursor inside a table first.");
@@ -193,13 +193,20 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
           table.style.border = 'none';
           cells.forEach(c => (c as HTMLElement).style.border = 'none');
       } else if (type === 'all') {
+          // Default style for All
           table.style.border = '1px solid black';
           table.style.borderCollapse = 'collapse';
           cells.forEach(c => (c as HTMLElement).style.border = '1px solid black');
       } else if (type === 'outer') {
+          // Frame only
           table.style.border = '1px solid black';
           table.style.borderCollapse = 'collapse';
           cells.forEach(c => (c as HTMLElement).style.border = 'none');
+      } else if (type === 'inner') {
+          // Grid only (no outer frame) - tricky with simple styles, approximate by setting table border 0
+          table.style.border = 'hidden'; // or none
+          table.style.borderCollapse = 'collapse';
+          cells.forEach(c => (c as HTMLElement).style.border = '1px solid black');
       }
       handleInput();
       setShowTableMenu(false);
@@ -222,6 +229,14 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
           if (node.nodeName === 'TABLE') break; // Stop at table if no cell found
           node = node.parentNode as Node;
       }
+      handleInput();
+  };
+
+  const applyTableBorderColor = (color: string) => {
+      const table = getParentTable();
+      if (!table) return;
+      table.style.borderColor = color;
+      table.querySelectorAll('td, th').forEach(c => (c as HTMLElement).style.borderColor = color);
       handleInput();
   };
   // --------------------------------
@@ -352,11 +367,16 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
                 <div className="absolute top-full left-0 mt-1 w-56 bg-white border border-gray-200 rounded shadow-lg z-50 p-2 flex flex-col gap-2">
                     <button onClick={insertTable} className="text-left text-xs p-1 hover:bg-gray-100 rounded w-full font-bold">+ New Table</button>
                     <div className="border-t border-gray-100 my-1"></div>
-                    <p className="text-[10px] text-gray-400 uppercase font-semibold">Table Borders</p>
+                    <p className="text-[10px] text-gray-400 uppercase font-semibold">Borders</p>
                     <div className="flex gap-1">
-                        <button onClick={() => applyTableBorder('all')} className="flex-1 text-[10px] border p-1 hover:bg-gray-50 text-center" title="All Borders">田 All</button>
-                        <button onClick={() => applyTableBorder('outer')} className="flex-1 text-[10px] border p-1 hover:bg-gray-50 text-center" title="Outer Only">囗 Outer</button>
+                        <button onClick={() => applyTableBorder('all')} className="flex-1 text-[10px] border p-1 hover:bg-gray-50 text-center" title="All Borders">All</button>
+                        <button onClick={() => applyTableBorder('outer')} className="flex-1 text-[10px] border p-1 hover:bg-gray-50 text-center" title="Outer Frame">Outer</button>
+                        <button onClick={() => applyTableBorder('inner')} className="flex-1 text-[10px] border p-1 hover:bg-gray-50 text-center" title="Inner Grid">Inner</button>
                         <button onClick={() => applyTableBorder('none')} className="flex-1 text-[10px] border p-1 hover:bg-gray-50 text-center" title="No Borders">None</button>
+                    </div>
+                    <div className="flex gap-1 items-center mt-1">
+                         <label className="text-[9px] text-gray-400">Border Color</label>
+                         <input type="color" onChange={(e) => applyTableBorderColor(e.target.value)} className="w-6 h-6 cursor-pointer border-0 p-0" title="Border Color" />
                     </div>
                     <div className="border-t border-gray-100 my-1"></div>
                     <p className="text-[10px] text-gray-400 uppercase font-semibold">Cell Background</p>

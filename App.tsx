@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { analyzeDocumentImage } from './services/geminiService';
-import { DocumentState, LetterSettings, TabView } from './types';
+import { DocumentState, LetterSettings, TabView, Variable } from './types';
 import EditorPanel from './components/EditorPanel';
 import TemplatePreview from './components/TemplatePreview';
 
@@ -53,7 +53,7 @@ const DEFAULT_SETTINGS: LetterSettings = {
   hasAttachment: false,
   attachmentShowKop: false,
   attachmentContent: `
-    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+    <table style="width: 100%; border-collapse: collapse; margin-top: 10px; border: 1px solid black;">
         <thead>
             <tr>
                 <th style="border: 1px solid black; padding: 5px;">No</th>
@@ -96,6 +96,7 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<LetterSettings>(DEFAULT_SETTINGS);
   const [view, setView] = useState<TabView>(TabView.UPLOAD);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bladeInputRef = useRef<HTMLInputElement>(null);
 
   const handleManualCreate = () => {
     setSettings(DEFAULT_SETTINGS);
@@ -114,7 +115,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Helper: Resize image to max 1024px width/height to save bandwidth & prevent PHP timeouts
   const resizeImage = (file: File): Promise<string> => {
       return new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -124,8 +124,7 @@ const App: React.FC = () => {
                   const canvas = document.createElement('canvas');
                   let width = img.width;
                   let height = img.height;
-                  const MAX_SIZE = 1024; // Safe size for shared hosting & Gemini
-
+                  const MAX_SIZE = 1024;
                   if (width > height) {
                       if (width > MAX_SIZE) {
                           height *= MAX_SIZE / width;
@@ -137,13 +136,10 @@ const App: React.FC = () => {
                           height = MAX_SIZE;
                       }
                   }
-
                   canvas.width = width;
                   canvas.height = height;
                   const ctx = canvas.getContext('2d');
                   ctx?.drawImage(img, 0, 0, width, height);
-                  
-                  // Compress to JPEG 0.7 quality
                   resolve(canvas.toDataURL('image/jpeg', 0.7)); 
               };
               img.src = e.target?.result as string;
@@ -152,6 +148,129 @@ const App: React.FC = () => {
           reader.readAsDataURL(file);
       });
   };
+
+  // --- PARSE BLADE FILE LOGIC ---
+  const handleBladeUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+          const text = e.target?.result as string;
+          try {
+              parseBladeContent(text);
+          } catch (err) {
+              alert("Error parsing Blade file. Is it a standard template?");
+              console.error(err);
+          }
+      };
+      reader.readAsText(file);
+  };
+
+  const parseBladeContent = (text: string) => {
+      const newSettings = { ...DEFAULT_SETTINGS };
+
+      // 1. Page Size
+      const pageRegex = /@page\s*\{\s*size:\s*([\d.]+[a-z]+)\s+([\d.]+[a-z]+);\s*margin:\s*([\d.]+[a-z]+)\s+([\d.]+[a-z]+)\s+([\d.]+[a-z]+)\s+([\d.]+[a-z]+);/i;
+      const pageMatch = text.match(pageRegex);
+      if (pageMatch) {
+          const widthStr = pageMatch[1];
+          const unitMatch = widthStr.match(/[a-z]+/i);
+          const unit = (unitMatch ? unitMatch[0] : 'cm') as any;
+
+          newSettings.unit = unit;
+          newSettings.pageWidth = parseFloat(pageMatch[1]);
+          newSettings.pageHeight = parseFloat(pageMatch[2]);
+          newSettings.marginTop = parseFloat(pageMatch[3]);
+          newSettings.marginRight = parseFloat(pageMatch[4]);
+          newSettings.marginBottom = parseFloat(pageMatch[5]);
+          newSettings.marginLeft = parseFloat(pageMatch[6]);
+          newSettings.pageSize = 'Custom';
+      }
+
+      // 2. Fonts
+      const fontRegex = /body\s*\{\s*font-family:\s*([^;]+);/i;
+      const fontMatch = text.match(fontRegex);
+      if (fontMatch) newSettings.globalFontFamily = fontMatch[1].trim();
+
+      // 3. Header
+      const headerRegex = /<table class="header-table"[^>]*>([\s\S]*?)<\/table>/i;
+      const headerMatch = text.match(headerRegex);
+      if (headerMatch) {
+          newSettings.showKop = true;
+          const textCellRegex = /<td[^>]*text-align:\s*center[^>]*>([\s\S]*?)<\/td>/i;
+          const textCellMatch = headerMatch[1].match(textCellRegex);
+          if (textCellMatch) newSettings.headerContent = textCellMatch[1].trim();
+
+          const imgRegex = /<img src="([^"]+)"/g;
+          const images = [...headerMatch[1].matchAll(imgRegex)];
+          if (images.length > 0) {
+              newSettings.logoUrl = images[0][1];
+              if (images.length > 1) {
+                  newSettings.showRightLogo = true;
+                  newSettings.rightLogoUrl = images[1][1];
+              }
+          }
+      } else {
+          newSettings.showKop = false;
+      }
+
+      // 4. Content
+      const contentRegex = /<div class="content">([\s\S]*?)<\/div>\s*(@if|@endif|<div class="signature)/i;
+      const contentMatch = text.match(contentRegex);
+      if (contentMatch) newSettings.rawHtmlContent = contentMatch[1].trim();
+
+      // 5. Footer
+      const footerRegex = /<div class="footer">([\s\S]*?)<\/div>/i;
+      const footerMatch = text.match(footerRegex);
+      if (footerMatch) {
+          newSettings.showFooter = true;
+          newSettings.footerContent = footerMatch[1].trim();
+      }
+
+      // 6. Attachments
+      const attachmentRegex = /<div class="attachment-section">([\s\S]*?)<\/div>/i;
+      const attachmentMatch = text.match(attachmentRegex);
+      if (attachmentMatch) {
+          newSettings.hasAttachment = true;
+          const pageBreakHeaderRegex = /<div class="page-break"><\/div>\s*<table class="header-table"/i;
+          if (text.match(pageBreakHeaderRegex)) newSettings.attachmentShowKop = true;
+          let attachContent = attachmentMatch[1].trim();
+          attachContent = attachContent.replace(/<h3>Lampiran<\/h3>/i, '');
+          newSettings.attachmentContent = attachContent.trim();
+      }
+
+      // 7. Variables
+      const varRegex = /\{\{\s*\$([a-zA-Z0-9_]+)\s*\}\}/g;
+      const foundVars = new Set<string>();
+      const varMatches = [...text.matchAll(varRegex)];
+      const newVariables: Variable[] = [];
+      varMatches.forEach((m, idx) => {
+          const key = m[1];
+          if (!foundVars.has(key) && key !== 'title') {
+              foundVars.add(key);
+              newVariables.push({
+                  id: `var-load-${idx}`,
+                  key: key,
+                  label: key.replace(/_/g, ' '),
+                  defaultValue: `[${key}]`
+              });
+          }
+      });
+      if (newVariables.length > 0) newSettings.variables = newVariables;
+      
+      // 8. Signatures (Simple detection)
+      if (text.includes('class="signature-container"')) {
+           newSettings.showSignature = true;
+           const cityRegex = />([^<]+),\s*\{\{\s*\$tanggal/i;
+           const cityMatch = text.match(cityRegex);
+           if (cityMatch) newSettings.signatureCity = cityMatch[1].trim();
+      }
+
+      setSettings(newSettings);
+      setView(TabView.EDITOR);
+  };
+  // -------------------------
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -178,20 +297,16 @@ const App: React.FC = () => {
         let finalMimeType = file.type;
 
         if (isImage) {
-            // Resize Image Client-Side
             const resizedDataUrl = await resizeImage(file);
             setDocState(prev => ({ ...prev, originalImage: resizedDataUrl }));
             base64Data = resizedDataUrl.split(',')[1];
             finalMimeType = 'image/jpeg';
         } else {
-            // Handle PDF (cannot easily resize client-side without heavy libs, send as is)
-            // Warning: Large PDFs might still timeout on cheap hosting
             const reader = new FileReader();
             base64Data = await new Promise((resolve, reject) => {
                 reader.onload = (e) => {
-                    const res = e.target?.result as string;
-                    setDocState(prev => ({ ...prev, originalImage: null })); // Cannot preview PDF easily
-                    resolve(res.split(',')[1]);
+                    setDocState(prev => ({ ...prev, originalImage: null }));
+                    resolve((e.target?.result as string).split(',')[1]);
                 };
                 reader.onerror = reject;
                 reader.readAsDataURL(file);
@@ -242,25 +357,17 @@ const App: React.FC = () => {
 
   const handleDownloadBlade = () => {
     const totalSigs = settings.signatures.length;
-    
-    // Determine overall container alignment for single signature
     let containerAlignStyle = "margin-top: 50px; width: 100%;";
     if (totalSigs === 1) {
         const align = settings.signatures[0].align || 'right';
         containerAlignStyle += ` text-align: ${align};`;
     } else {
-        containerAlignStyle += " overflow: hidden;"; // Clear floats
+        containerAlignStyle += " overflow: hidden;";
     }
 
     const signaturesHtml = settings.signatures.map((sig, idx) => {
         const isLast = idx === totalSigs - 1;
         const isOdd = totalSigs % 2 !== 0;
-        
-        // CSS Logic for Layout:
-        // 1. Single Sig: Inline-block (handled by container text-align)
-        // 2. Multiple Sigs: Float left 50%
-        // 3. Odd Last Sig (>1): Clear both, 100% width, center.
-        
         let blockStyle = '';
         if (totalSigs === 1) {
             blockStyle = 'display: inline-block; text-align: center; min-width: 200px; vertical-align: top;';
@@ -281,7 +388,6 @@ const App: React.FC = () => {
     `;
     }).join('');
 
-    // Generate Dynamic Header Lines HTML
     const headerLinesHtml = settings.headerLines.map(line => `
         <div style="
             border-bottom: ${line.width}px ${line.style} ${line.color}; 
@@ -292,13 +398,11 @@ const App: React.FC = () => {
         "></div>
     `).join('');
 
-    // Construct the Header Table (for Blade/PDF compatibility)
-    // We use a 3-column table to ensure logos sit on left/right correctly
     const rightLogoHtml = settings.showRightLogo && settings.rightLogoUrl 
         ? `<td style="width: ${settings.rightLogoWidth}px; vertical-align: middle; text-align: right; padding-left: 10px;">
              <img src="${settings.rightLogoUrl}" alt="Right Logo" style="width: 100%; height: auto;">
            </td>` 
-        : (settings.logoUrl && settings.showRightLogo ? `<td style="width: 1px;"></td>` : ''); // Spacer if needed
+        : (settings.logoUrl && settings.showRightLogo ? `<td style="width: 1px;"></td>` : '');
 
     const headerHtml = `
     <table class="header-table" style="width: 100%; border: none; margin-bottom: 5px; font-family: ${settings.headerFontFamily.replace(/"/g, "'")};">
@@ -339,32 +443,21 @@ const App: React.FC = () => {
         table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
         th, td { border: 1px solid black; padding: 4px; text-align: left; }
         
-        /* Header Specifics */
         .header-lines { margin-bottom: 15px; }
-
         .content { font-family: ${settings.contentFontFamily.replace(/"/g, "'")}; }
-        
         .footer { 
             position: fixed; 
-            bottom: 0; 
-            left: 0; 
-            right: 0; 
-            height: 30px; 
-            text-align: center; 
-            font-size: 0.8em; 
-            color: #666;
+            bottom: 0; left: 0; right: 0; 
+            height: 30px; text-align: center; font-size: 0.8em; color: #666;
             border-top: 1px solid #eee; 
         }
-
         .page-break { page-break-before: always; clear: both; }
         .attachment-section { font-family: ${settings.attachmentFontFamily.replace(/"/g, "'")}; }
     </style>
 </head>
 <body>
     @if(${settings.showFooter ? 'true' : 'false'})
-    <div class="footer">
-        ${settings.footerContent}
-    </div>
+    <div class="footer">${settings.footerContent}</div>
     @endif
 
     @if(${settings.showKop ? 'true' : 'false'})
@@ -379,12 +472,10 @@ const App: React.FC = () => {
 
     @if(${settings.hasAttachment ? 'true' : 'false'})
     <div class="page-break"></div>
-    
     @if(${settings.attachmentShowKop ? 'true' : 'false'})
     ${headerHtml}
     <br>
     @endif
-
     <div class="attachment-section">
         <h3>Lampiran</h3>
         ${settings.attachmentContent}
@@ -451,7 +542,15 @@ const App: React.FC = () => {
                             <p className="col-span-2 text-xs text-indigo-600 font-medium text-center bg-indigo-50 py-2 rounded border border-indigo-100">
                                 Start from scratch with a blank canvas. No AI analysis.
                             </p>
-                            <button onClick={handleOpenViewer} className="w-full py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-xs text-gray-600 col-span-2">
+
+                            <div className="col-span-2 relative group">
+                                <input type="file" accept=".php" ref={bladeInputRef} onChange={handleBladeUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                                <button className="w-full py-3 rounded-xl border-2 border-indigo-100 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium shadow-sm transition-colors">
+                                    📂 Upload .blade.php to Edit
+                                </button>
+                            </div>
+
+                            <button onClick={handleOpenViewer} className="w-full py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-xs text-gray-600 col-span-2 mt-2">
                                 ↗ Open Viewer
                             </button>
                         </div>

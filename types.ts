@@ -1,3 +1,4 @@
+
 export interface DocumentState {
   originalImage: string | null;
   isAnalyzing: boolean;
@@ -49,8 +50,16 @@ export interface LetterSettings {
   showKop: boolean;
   headerContent: string;
   headerLines: HeaderLine[];
+  
+  // Left Logo
   logoUrl: string;
   logoAspectRatio: string;
+  logoWidth: number; // px
+
+  // Right Logo (New)
+  showRightLogo: boolean;
+  rightLogoUrl: string;
+  rightLogoWidth: number; // px
 
   // Content
   rawHtmlContent: string;

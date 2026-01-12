@@ -22,6 +22,7 @@ const EditorPanel: React.FC<EditorPanelProps> = ({ settings, setSettings, onDown
   const [logoPrompt, setLogoPrompt] = useState("");
   const [isGeneratingLogo, setIsGeneratingLogo] = useState(false);
   const [activeSection, setActiveSection] = useState<'layout' | 'header' | 'content' | 'attachments' | 'footer' | 'variables'>('content');
+  const [dragActive, setDragActive] = useState(false);
 
   const updateSetting = <K extends keyof LetterSettings>(key: K, value: LetterSettings[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));
@@ -87,21 +88,23 @@ const EditorPanel: React.FC<EditorPanelProps> = ({ settings, setSettings, onDown
     }
   };
   
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>, isRight: boolean = false) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (ev) => {
-        updateSetting('logoUrl', ev.target?.result as string);
+        if (isRight) {
+            updateSetting('rightLogoUrl', ev.target?.result as string);
+        } else {
+            updateSetting('logoUrl', ev.target?.result as string);
+        }
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleAttachmentUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
+  // Attachment Logic
+  const processAttachmentFile = (file: File) => {
       const reader = new FileReader();
       reader.onload = (ev) => {
           const result = ev.target?.result as string;
@@ -109,13 +112,37 @@ const EditorPanel: React.FC<EditorPanelProps> = ({ settings, setSettings, onDown
               const imgTag = `<br><img src="${result}" style="max-width: 100%; height: auto; margin: 10px 0;" /><br>`;
               updateSetting('attachmentContent', settings.attachmentContent + imgTag);
           } else {
-             alert("Only Images (JPG/PNG) are supported for manual inline insertion. For text content, please copy-paste.");
+             alert("Only Images (JPG/PNG) are supported for manual inline insertion.");
           }
       };
       if (file.type.startsWith('image/')) {
           reader.readAsDataURL(file);
-      } else {
-          reader.readAsText(file);
+      }
+  };
+
+  const handleAttachmentUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) processAttachmentFile(file);
+  };
+
+  // Drag & Drop Handlers for Attachments
+  const handleDrag = (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.type === 'dragenter' || e.type === 'dragover') {
+          setDragActive(true);
+      } else if (e.type === 'dragleave') {
+          setDragActive(false);
+      }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragActive(false);
+      
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+          processAttachmentFile(e.dataTransfer.files[0]);
       }
   };
 
@@ -326,11 +353,26 @@ const EditorPanel: React.FC<EditorPanelProps> = ({ settings, setSettings, onDown
 
             {settings.showKop && (
               <>
+                {/* LEFT LOGO */}
                 <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                    <h3 className="text-xs font-bold text-gray-500 uppercase mb-3">Logo Settings</h3>
+                    <h3 className="text-xs font-bold text-gray-500 uppercase mb-3">Main Logo (Left)</h3>
                     <div className="mb-3">
                         <label className="text-xs text-gray-400 block mb-1">Upload Logo Image</label>
-                        <input type="file" accept="image/*" onChange={handleLogoUpload} className="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
+                        <input type="file" accept="image/*" onChange={(e) => handleLogoUpload(e, false)} className="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
+                    </div>
+                    <div className="mb-3">
+                         <label className="text-xs text-gray-400 block mb-1 flex justify-between">
+                            <span>Width (Size)</span>
+                            <span>{settings.logoWidth}px</span>
+                         </label>
+                         <input 
+                            type="range" 
+                            min="30" 
+                            max="200" 
+                            value={settings.logoWidth} 
+                            onChange={(e) => updateSetting('logoWidth', parseInt(e.target.value))}
+                            className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer"
+                         />
                     </div>
                     <div>
                         <label className="text-xs text-gray-400 block mb-1">Generate AI Logo (Description)</label>
@@ -352,9 +394,40 @@ const EditorPanel: React.FC<EditorPanelProps> = ({ settings, setSettings, onDown
                         </div>
                     </div>
                 </div>
+                
+                {/* RIGHT LOGO */}
+                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="flex items-center gap-2 mb-3">
+                        <input type="checkbox" checked={settings.showRightLogo} onChange={(e) => updateSetting('showRightLogo', e.target.checked)} className="rounded text-indigo-600" />
+                        <h3 className="text-xs font-bold text-gray-500 uppercase">Secondary Logo (Right)</h3>
+                    </div>
+                    
+                    {settings.showRightLogo && (
+                        <>
+                             <div className="mb-3">
+                                <label className="text-xs text-gray-400 block mb-1">Upload Right Logo</label>
+                                <input type="file" accept="image/*" onChange={(e) => handleLogoUpload(e, true)} className="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
+                            </div>
+                            <div className="mb-3">
+                                <label className="text-xs text-gray-400 block mb-1 flex justify-between">
+                                    <span>Width (Size)</span>
+                                    <span>{settings.rightLogoWidth}px</span>
+                                </label>
+                                <input 
+                                    type="range" 
+                                    min="30" 
+                                    max="200" 
+                                    value={settings.rightLogoWidth} 
+                                    onChange={(e) => updateSetting('rightLogoWidth', parseInt(e.target.value))}
+                                    className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer"
+                                />
+                            </div>
+                        </>
+                    )}
+                </div>
 
                 <div>
-                   <label className="text-xs text-gray-400 block mb-1">Header Content</label>
+                   <label className="text-xs text-gray-400 block mb-1">Header Content (Text)</label>
                    <RichTextEditor content={settings.headerContent} onChange={(html) => updateSetting('headerContent', html)} defaultFontFamily={settings.headerFontFamily} minHeight="120px" />
                 </div>
                 
@@ -511,7 +584,7 @@ const EditorPanel: React.FC<EditorPanelProps> = ({ settings, setSettings, onDown
         {activeSection === 'attachments' && (
             <div className="space-y-4 h-full flex flex-col">
                  <div className="bg-yellow-50 p-3 rounded text-xs text-yellow-800 border border-yellow-200">
-                    <strong>Attachments:</strong> Automatically starts on a new page. You can add tables or upload images manually.
+                    <strong>Attachments:</strong> Automatically starts on a new page. Drag and drop images here or use the editor.
                  </div>
 
                  <div className="flex items-center gap-4 mb-2 flex-wrap">
@@ -538,13 +611,21 @@ const EditorPanel: React.FC<EditorPanelProps> = ({ settings, setSettings, onDown
                  </div>
 
                  {settings.hasAttachment && (
-                    <div className="flex-1 flex flex-col min-h-[400px]">
+                    <div 
+                        className={`flex-1 flex flex-col min-h-[400px] border-2 border-dashed rounded-lg p-2 transition-colors ${dragActive ? 'border-indigo-500 bg-indigo-50' : 'border-transparent'}`}
+                        onDragEnter={handleDrag}
+                        onDragLeave={handleDrag}
+                        onDragOver={handleDrag}
+                        onDrop={handleDrop}
+                    >
                         <div className="flex items-center gap-2 mb-2">
                             <label className="text-xs bg-gray-100 hover:bg-gray-200 border border-gray-300 px-2 py-1 rounded cursor-pointer">
                                 <span>Upload Image to Attachment</span>
                                 <input type="file" accept="image/*" className="hidden" onChange={handleAttachmentUpload} />
                             </label>
                             
+                            <span className="text-[10px] text-gray-400 hidden lg:inline">or Drag & Drop Image here</span>
+
                             <select 
                                 value={settings.attachmentFontFamily} 
                                 onChange={(e) => updateSetting('attachmentFontFamily', e.target.value)}
@@ -563,7 +644,7 @@ const EditorPanel: React.FC<EditorPanelProps> = ({ settings, setSettings, onDown
                             availableVariables={settings.variables}
                             onAddVariable={handleAddVariable}
                             minHeight="400px"
-                            placeholder="Tables, Lists, or Images..."
+                            placeholder="Tables, Lists, or Drag Images here..."
                         />
                     </div>
                  )}

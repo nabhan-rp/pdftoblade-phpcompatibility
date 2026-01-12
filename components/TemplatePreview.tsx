@@ -50,13 +50,27 @@ const TemplatePreview: React.FC<TemplatePreviewProps> = ({ settings, scale = 1 }
 
   const HeaderComponent = () => (
     <div className="mb-2">
-        <div className="flex items-center gap-4 mb-2" style={{ fontFamily: settings.headerFontFamily }}>
-        {settings.logoUrl && (
-            <div className="flex-shrink-0" style={{ width: '80px' }}>
-            <img src={settings.logoUrl} alt="Logo" className="w-full h-auto object-contain" />
-            </div>
-        )}
-        <div className="flex-grow text-center leading-tight text-black" dangerouslySetInnerHTML={{ __html: processedHeader }} />
+        {/* Flex Container for Left Logo - Center Text - Right Logo */}
+        <div className="flex justify-between items-center mb-2" style={{ fontFamily: settings.headerFontFamily }}>
+            
+            {/* Left Logo */}
+            {settings.logoUrl && (
+                <div className="flex-shrink-0 mr-4" style={{ width: `${settings.logoWidth}px` }}>
+                    <img src={settings.logoUrl} alt="Logo" className="w-full h-auto object-contain" />
+                </div>
+            )}
+            
+            {/* Center Text */}
+            <div className="flex-grow text-center leading-tight text-black" dangerouslySetInnerHTML={{ __html: processedHeader }} />
+            
+            {/* Right Logo (Optional) */}
+            {settings.showRightLogo && settings.rightLogoUrl && (
+                <div className="flex-shrink-0 ml-4" style={{ width: `${settings.rightLogoWidth}px` }}>
+                     <img src={settings.rightLogoUrl} alt="Right Logo" className="w-full h-auto object-contain" />
+                </div>
+            )}
+
+            {/* Spacer to balance if right logo is hidden but we wanted layout balance (optional, usually not needed in flex 'between') */}
         </div>
         <HeaderLines />
     </div>

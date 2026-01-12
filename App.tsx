@@ -37,9 +37,17 @@ const DEFAULT_SETTINGS: LetterSettings = {
       { id: 'l1', width: 3, style: 'solid', color: '#000000', marginTop: 8, marginBottom: 2 },
       { id: 'l2', width: 1, style: 'solid', color: '#000000', marginTop: 0, marginBottom: 0 },
   ],
+  
+  // Left Logo
   logoUrl: "https://upload.wikimedia.org/wikipedia/commons/e/ec/Logo_UIN_Sunan_Gunung_Djati_Bandung.png", 
   logoAspectRatio: "1:1",
-  
+  logoWidth: 80, // Default width
+
+  // Right Logo
+  showRightLogo: false,
+  rightLogoUrl: "",
+  rightLogoWidth: 80,
+
   rawHtmlContent: "<p>Kepada Yth.<br><strong>{{ $nama_penerima }}</strong><br>di Tempat</p><p>Assalamu'alaikum Wr. Wb.</p><p>Dengan hormat, sehubungan dengan...</p>",
   
   hasAttachment: false,
@@ -92,6 +100,11 @@ const App: React.FC = () => {
   const handleManualCreate = () => {
     setSettings(DEFAULT_SETTINGS);
     setView(TabView.EDITOR);
+  };
+
+  const handleOpenViewer = () => {
+      const viewerUrl = new URL('bladeviewer/', window.location.href).href;
+      window.open(viewerUrl, '_blank');
   };
 
   const handleBackToUpload = () => {
@@ -279,6 +292,34 @@ const App: React.FC = () => {
         "></div>
     `).join('');
 
+    // Construct the Header Table (for Blade/PDF compatibility)
+    // We use a 3-column table to ensure logos sit on left/right correctly
+    const rightLogoHtml = settings.showRightLogo && settings.rightLogoUrl 
+        ? `<td style="width: ${settings.rightLogoWidth}px; vertical-align: middle; text-align: right; padding-left: 10px;">
+             <img src="${settings.rightLogoUrl}" alt="Right Logo" style="width: 100%; height: auto;">
+           </td>` 
+        : (settings.logoUrl && settings.showRightLogo ? `<td style="width: 1px;"></td>` : ''); // Spacer if needed
+
+    const headerHtml = `
+    <table class="header-table" style="width: 100%; border: none; margin-bottom: 5px; font-family: ${settings.headerFontFamily.replace(/"/g, "'")};">
+        <tr>
+            ${settings.logoUrl ? `
+            <td style="width: ${settings.logoWidth}px; vertical-align: middle; text-align: left; padding-right: 10px;">
+                <img src="${settings.logoUrl}" alt="Logo" style="width: 100%; height: auto;">
+            </td>` : ''}
+            
+            <td style="vertical-align: middle; text-align: center;">
+                ${settings.headerContent}
+            </td>
+            
+            ${rightLogoHtml}
+        </tr>
+    </table>
+    <div class="header-lines">
+        ${headerLinesHtml}
+    </div>
+    `;
+
     const bladeContent = `<!DOCTYPE html>
 <html>
 <head>
@@ -298,12 +339,7 @@ const App: React.FC = () => {
         table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
         th, td { border: 1px solid black; padding: 4px; text-align: left; }
         
-        .header-container { display: table; width: 100%; margin-bottom: 5px; font-family: ${settings.headerFontFamily.replace(/"/g, "'")}; }
-        .header-logo { display: table-cell; vertical-align: middle; width: 80px; padding-right: 15px; }
-        .header-logo img { width: 100%; height: auto; }
-        .header-content { display: table-cell; vertical-align: middle; text-align: center; }
-        
-        /* Dynamic Header Lines Container */
+        /* Header Specifics */
         .header-lines { margin-bottom: 15px; }
 
         .content { font-family: ${settings.contentFontFamily.replace(/"/g, "'")}; }
@@ -332,13 +368,7 @@ const App: React.FC = () => {
     @endif
 
     @if(${settings.showKop ? 'true' : 'false'})
-    <div class="header-container">
-        <div class="header-logo"><img src="${settings.logoUrl}" alt="Logo"></div>
-        <div class="header-content">${settings.headerContent}</div>
-    </div>
-    <div class="header-lines">
-        ${headerLinesHtml}
-    </div>
+    ${headerHtml}
     @endif
 
     <div class="content">${settings.rawHtmlContent}</div>
@@ -351,13 +381,7 @@ const App: React.FC = () => {
     <div class="page-break"></div>
     
     @if(${settings.attachmentShowKop ? 'true' : 'false'})
-    <div class="header-container">
-        <div class="header-logo"><img src="${settings.logoUrl}" alt="Logo"></div>
-        <div class="header-content">${settings.headerContent}</div>
-    </div>
-    <div class="header-lines">
-        ${headerLinesHtml}
-    </div>
+    ${headerHtml}
     <br>
     @endif
 
@@ -420,13 +444,13 @@ const App: React.FC = () => {
                             <div className="flex-grow border-t border-gray-200"></div>
                         </div>
 
-                        <div className="text-left">
-                            <button onClick={handleManualCreate} className="w-full py-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 font-medium text-gray-700 shadow-sm">
+                        <div className="text-left grid grid-cols-2 gap-2">
+                            <button onClick={handleManualCreate} className="w-full py-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 font-medium text-gray-700 shadow-sm col-span-2">
                                 Manual Creation
                             </button>
-                            <p className="text-xs text-indigo-600 font-medium mt-2 text-center bg-indigo-50 py-2 rounded border border-indigo-100">
-                                Start from scratch with a blank canvas. No AI analysis.
-                            </p>
+                            <button onClick={handleOpenViewer} className="w-full py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-xs text-gray-600 col-span-2">
+                                ↗ Open Viewer
+                            </button>
                         </div>
                     </div>
                  </div>
